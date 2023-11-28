@@ -26,6 +26,7 @@
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 
+void check_reset_button(int blink_count, int max_count);
 
 #define     EE_STR     30
 
@@ -33,7 +34,8 @@ AsyncWebServer server(80);
 
 char saved_ssid[EE_STR];
 char saved_pswd[EE_STR];
-char saved_devc[EE_STR];
+char saved_name[EE_STR];
+char saved_type[EE_STR];
 char saved_ip[EE_STR];
 char saved_gwy[EE_STR];
 char saved_msk[EE_STR];
@@ -44,7 +46,8 @@ const char* password = "123456789";
 
 String ssid_ap;
 String pswd_ap;
-String devc_ap;
+String name_ap;
+String type_ap;
 String ip_ap;
 String gwy_ap;
 String msk_ap;
@@ -60,13 +63,16 @@ const char index_html[] PROGMEM = R"rawliteral(
    <h4>Configure your device</h4>
    <form action="/action_page">
    SSID_Name:<br>
-   <input type="text" name="ssid_name" value="ViGIR">
+   <input type="text" name="ssid_name" value="YourSSIC">
    <br>
    SSID_Passwd:<br>
    <input type="text" name="ssid_pswd" value="Password">
    <br>
    Device_Name:<br>
    <input type="text" name="devc_name" value="Test">
+   <br>
+   Device_Type:<br>
+   <input type="text" name="devc_type" value="State/Pulse (or ms)">
    <br>
    Device_IP:<br>
    <input type="text" name="devc_ip" value="10.14.1.210">
@@ -115,6 +121,9 @@ IPAddress str2ip (char *str) {
 void setupAP(){
    // Serial port for debugging purposes
    Serial.print("Setting AP (Access Point)…");
+   
+   WiFi.mode(WIFI_STA);
+   WiFi.config(local_IP_AP, gateway_AP, subnet_AP);
 
    // Remove the password parameter, if you want the AP (Access Point) to be open
    // WiFi.softAP(ssid, password);
@@ -125,6 +134,8 @@ void setupAP(){
    WiFi.softAPConfig(local_IP_AP, gateway_AP, subnet_AP);
    delay(5000);
 
+   Serial.printf("\nESP Board MAC Address:  ");
+   Serial.println(WiFi.macAddress());
    IPAddress IP = WiFi.softAPIP();
    Serial.print("AP IP address: ");
    Serial.println(IP);
@@ -144,19 +155,22 @@ void setupAP(){
    server.on("/action_page", HTTP_GET, [] (AsyncWebServerRequest *request){
      ssid_ap = request->arg("ssid_name");
      pswd_ap = request->arg("ssid_pswd");
-     devc_ap = request->arg("devc_name");
+     name_ap = request->arg("devc_name");
+     type_ap = request->arg("devc_type");
      ip_ap = request->arg("devc_ip");
      gwy_ap = request->arg("devc_gwy");
      msk_ap = request->arg("devc_msk");
      mqtt_ap = request->arg("mqtt_ip");
 
-     String s = "<h2> Configured: ssid_name " + ssid_ap + "<br>" +
+     String s = "<h2> Configured : ssid_name " + ssid_ap + "<br>" +
                     "            ssid_pswd " + pswd_ap + "<br>" +
-                    "            devc_name " + devc_ap + "<br>" +
+                    "            devc_name " + name_ap + "<br>" +
+                    "            devc_type " + type_ap + "<br>" +
                     "            devc_ip   " + ip_ap + "<br>" +
                     "            devc_gwy  " + gwy_ap + "<br>" +
                     "            devc_msk  " + msk_ap + "<br>" +
                     "            mqtt_ip   " + mqtt_ap + "<br>" +
+                    "            MAC   " + WiFi.macAddress() + "<br>" +
                     "<a href='/'> Go Back </a> </h2>"; //Send web page
 
      request->send(300, "text/html", s); //Send web page
@@ -214,8 +228,11 @@ void setupAP(){
  
 void loopAP() {
    IPAddress ip = (0,0,0,0);
+   int count;
 
-   ArduinoOTA.handle();
+   if (((count++) % 1000) == 0) ArduinoOTA.handle();  // give some time for checking the button
+
+   check_reset_button(1200, 5000);
 
    if (ssid_ap.length() == 0) {
       Serial.println("Waiting...\r\n");
@@ -228,11 +245,15 @@ void loopAP() {
       Serial.println(pswd_ap);
 
       Serial.print("Device Name:");
-      Serial.println(devc_ap);
+      Serial.println(name_ap);
+
+      Serial.print("Device Type:");
+      Serial.println(type_ap);
 
       ssid_ap.toCharArray(saved_ssid, ssid_ap.length()+1);  // +1 to include \0
       pswd_ap.toCharArray(saved_pswd, pswd_ap.length()+1);
-      devc_ap.toCharArray(saved_devc, devc_ap.length()+1);
+      name_ap.toCharArray(saved_name, name_ap.length()+1);
+      type_ap.toCharArray(saved_type, type_ap.length()+1);
       ip_ap.toCharArray(saved_ip, ip_ap.length()+1);
       gwy_ap.toCharArray(saved_gwy, gwy_ap.length()+1);
       msk_ap.toCharArray(saved_msk, msk_ap.length()+1);
@@ -257,14 +278,16 @@ void loopAP() {
 
       EEPROM.put(0, saved_ssid);
       EEPROM.put(1*EE_STR, saved_pswd);
-      EEPROM.put(2*EE_STR, saved_devc);
-      EEPROM.put(3*EE_STR, saved_ip);
-      EEPROM.put(4*EE_STR, saved_gwy);
-      EEPROM.put(5*EE_STR, saved_msk);
-      EEPROM.put(6*EE_STR, saved_mqtt);
+      EEPROM.put(2*EE_STR, saved_name);
+      EEPROM.put(3*EE_STR, saved_type);
+      EEPROM.put(4*EE_STR, saved_ip);
+      EEPROM.put(5*EE_STR, saved_gwy);
+      EEPROM.put(6*EE_STR, saved_msk);
+      EEPROM.put(7*EE_STR, saved_mqtt);
       EEPROM.commit();
+      EEPROM.end();
 
       // server.handleClient();          //Handle client requests
-      delay(2000);
+      delay(5000);
       Serial.println("Preparing to reboot in Device mode\r\n");
       ESP.restart(); } }
